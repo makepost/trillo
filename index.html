@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+  <meta charset="utf-8" />
+
+  <title>Trello to CSV</title>
+
+  <link rel="icon"
+        href="/favicon.ico" />
+
+  <link rel="stylesheet"
+        href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+        integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+        crossorigin="anonymous" />
+
+  <style>
+    * {
+      border-radius: 0 !important;
+    }
+
+    th {
+      cursor: pointer;
+    }
+
+    [aria-sort="descending"] {
+      font-style: italic;
+    }
+
+    [aria-sort="ascending"] {
+      font-style: italic;
+      transform: scaleY(-1);
+    }
+
+    [data-hours="1"] {
+      color: var(--green);
+    }
+
+    [data-hours="2"] {
+      color: var(--yellow);
+    }
+
+    [data-hours="4"] {
+      color: var(--orange);
+    }
+
+    [data-hours="8"] {
+      color: var(--red);
+    }
+  </style>
+</head>
+
+<body class="p-5"
+      style="background-color: #f1f2f3; color: #555;">
+  <h1>...</h1>
+
+  <div class="row">
+    <p class="col-6 col-lg form-group"
+       hidden>
+      <label for="base">Base</label>
+
+      <input class="form-control"
+             id="base"
+             value="https://api.trello.com/1/boards" />
+    </p>
+
+    <p class="col-6 col-lg form-group">
+      <label for="board">Trello board URL</label>
+
+      <input class="form-control"
+             id="board"
+             placeholder="https://trello.com/b/your-board" />
+    </p>
+
+    <p class="col-6 col-lg form-group">
+      <label for="key">
+        <a href="https://trello.com/app-key">API key</a>
+      </label>
+
+      <input class="form-control"
+             id="key"
+             type="password" />
+    </p>
+
+    <p class="col-6 col-lg form-group"
+       hidden>
+      <label for="labels">Labels</label>
+
+      <input class="form-control"
+             id="labels"
+             value=",green,yellow,,orange,,,,red" />
+    </p>
+
+    <p class="col-6 col-lg form-group">
+      <label for="token">
+        <a href="https://trello.com/app-key">Token</a>
+      </label>
+
+      <input class="form-control"
+             id="token"
+             type="password" />
+    </p>
+
+    <p class="col-6 col-lg form-group">
+      <label for="wasted">Wasted hours</label>
+
+      <input class="form-control"
+             id="wasted"
+             readonly />
+    </p>
+  </div>
+
+  <div class="row">
+    <div class="col-12 col-lg table-responsive-lg">
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th style="width: 7em;">Members</th>
+            <th style="width: 6em;">Hours</th>
+            <th>Due</th>
+          </tr>
+        </thead>
+
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <p class="col-12 col-lg-4 form-group">
+      <label for="csv">Spreadsheet-friendly CSV
+        <button class="btn btn-outline-primary btn-sm ml-1">Copy</button>
+      </label>
+
+      <textarea class="form-control text-nowrap"
+                id="csv">Loading...</textarea>
+    </p>
+  </div>
+
+  <script src="https://unpkg.com/tablesort@5.0.2/dist/tablesort.min.js"></script>
+
+  <script>
+    /** @type {typeof document.querySelector} */
+    const q = document.querySelector.bind(document);
+
+    /** @type {typeof document.querySelectorAll} */
+    const $ = document.querySelectorAll.bind(document);
+
+    const $sort = new Tablesort(q("table"));
+
+    let query = "";
+
+    for (const $input of $("input")) {
+      for (const name of "blur input paste".split(" ")) {
+        if ($input.id === "board" || $input.id === "key" || $input.id === "token") {
+          $input.addEventListener(name, ev => {
+            localStorage.setItem(ev.target.id, ev.target.value);
+          });
+        }
+
+        $input.addEventListener(name, handleChange);
+      }
+    }
+
+    const $btn = q("button");
+
+    $btn.addEventListener("click", () => {
+      q("#csv").select();
+      document.execCommand("copy");
+    });
+
+    window.addEventListener("storage", handleChange);
+
+    handleChange();
+
+    function handleChange() {
+      for (const $input of $("input")) {
+        if ($input.id === "board" || $input.id === "key" || $input.id === "token") {
+          $input.value = localStorage.getItem($input.id) || $input.value;
+        }
+      }
+
+      let nextQuery = "";
+
+      for (const $input of $("input")) {
+        if (!$input.readOnly) {
+          nextQuery += `&${encodeURIComponent($input.value)}`;
+        }
+      }
+
+      if (nextQuery !== query) {
+        query = nextQuery;
+        refresh();
+      }
+    }
+
+    function refresh() {
+      const base = q("#base").value;
+      const board = q("#board").value.replace(/^.*?\/b\/([^/]+)\/.*$/, "$1");
+      const key = q("#key").value;
+      const labels = q("#labels").value.split(",");
+      const token = q("#token").value;
+
+      if (!board || !key || !token) {
+        return;
+      }
+
+      fetch(`${base}/${board}?key=${key}&token=${token}`)
+        .then(x => x.json())
+        .then(x => {
+          const title = x.name.replace(/[<>&]/g, "+");
+
+          document.title = title;
+          q("h1").innerHTML = title;
+        });
+
+      fetch(`${base}/${board}/cards?members=true&key=${key}&token=${token}`)
+        .then(x => x.json())
+        .then(cards => {
+          const rows = cards
+            .map(x => ({
+              due: x.dueComplete ? new Date(x.due).getTime() : 0,
+              label: x.labels.length === 1 ? x.labels[0].color : "",
+              members: x.members
+                .map(y =>
+                  y.fullName
+                    .split(" ")
+                    .map(z => z[0])
+                    .join("")
+                )
+                .sort()
+                .join(" "),
+              name: x.name,
+              shortUrl: x.shortUrl
+            }))
+            .sort((a, b) => b.due - a.due)
+            .map(x =>
+              [
+                x.name,
+                x.members,
+                x.label ? Math.max(0, labels.indexOf(x.label)) : "",
+                x.due
+                  ? new Date(x.due).getFullYear() + "/" +
+                  ("0" + (new Date(x.due).getMonth() + 1)).slice(-2) + "/" +
+                  ("0" + new Date(x.due).getDate()).slice(-2)
+                  : ""
+              ].map(y => y.toString().replace(/[,\n]/g, ";"))
+            );
+
+          q("#csv").rows = rows.length;
+          q("#csv").value = rows.map(x => x.join(",")).join("\n");
+
+          q("tbody").innerHTML = rows
+            .map(
+              x =>
+                `<tr data-hours="${Number(x[2])}">${x
+                  .map(y => `<td>${y.replace(/[<>&]/g, "+")}</td>`)
+                  .join("")}</tr>`
+            )
+            .join("");
+
+          $sort.refresh();
+
+          const wasted = rows
+            .filter(x => !!x[3])
+            .map(x => Number(x[2]) || 0)
+            .reduce((a, b) => a + b, 0);
+
+          const total = rows
+            .map(x => Number(x[2]) || 0)
+            .reduce((a, b) => a + b, 0);
+
+          const percentage = Math.floor(wasted / total * 100);
+
+          q("#wasted").value = `${wasted} / ${total} = ${percentage} %`;
+        });
+    }
+  </script>
+</body>
+
+</html>
